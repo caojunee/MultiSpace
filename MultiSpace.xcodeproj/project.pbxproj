@@ -17,13 +17,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		000000000000000000000201 /* MultiSpaceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiSpaceApp.swift; sourceTree = "<group>"; };
-		000000000000000000000202 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		000000000000000000000203 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
-		000000000000000000000204 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		000000000000000000000205 /* WebSpaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSpaceView.swift; sourceTree = "<group>"; };
-		000000000000000000000206 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
-		000000000000000000000207 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		000000000000000000000201 /* MultiSpaceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/MultiSpaceApp.swift"; sourceTree = "<group>"; };
+		000000000000000000000202 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/Models.swift"; sourceTree = "<group>"; };
+		000000000000000000000203 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/DataStore.swift"; sourceTree = "<group>"; };
+		000000000000000000000204 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/ContentView.swift"; sourceTree = "<group>"; };
+		000000000000000000000205 /* WebSpaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/WebSpaceView.swift"; sourceTree = "<group>"; };
+		000000000000000000000206 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/VaultView.swift"; sourceTree = "<group>"; };
+		000000000000000000000207 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MultiSpace/SettingsView.swift"; sourceTree = "<group>"; };
 		000000000000000000000210 /* MultiSpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MultiSpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
