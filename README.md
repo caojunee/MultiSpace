@@ -22,11 +22,11 @@
 
 私有仓库那个 200 分钟是这么来的：2026-01-01 调价后免费额度为 $12/月，折算 2,000「Linux 等效分钟」；macOS 标准 runner 按 **10x** 系数扣减，2,000 ÷ 10 = 200 分钟真实时间。这条**只对私有仓库生效**，公开仓库不进这套账。另外私有仓库跑 macOS job 还必须绑支付方式（否则 `Usage blocked`），公开仓库也没这个要求。
 
-单次冷构建经验值 **6~12 分钟**（纯 SwiftUI、7 个源文件、零第三方依赖，`macos-26` runner 预装 Xcode 26.4.1）。首次跑通后看 Actions 的 step summary 里的实际耗时即可。
+单次构建实测 **约 1 分钟**（纯 SwiftUI、7 个源文件、零第三方依赖，`macos-26` runner 预装 Xcode 26.x，2026-11-11 实测为 26.6 / iPhoneOS26.5 SDK，无需下载 SDK 或 pod）。排队或冷启动会更久，看 Actions 的 step summary 里的实际耗时即可。
 
 ### 三个仍然要注意的点
 
-1. **Artifact 存储**免费 500MB，是**累计占用**不是月度重置。workflow 已设 `retention-days: 7`，IPA 一般 5~15MB，够用；别把保留期调到 90 天。
+1. **Artifact 存储**免费 500MB，是**累计占用**不是月度重置。workflow 已设 `retention-days: 7`，本工程 IPA 仅 164 KB，够用；别把保留期调到 90 天。
 2. **公开仓库的 Actions 日志任何人可见。** 这个 workflow 只打印 Xcode 版本、Bundle ID、导出方式和「签名材料是否齐备」这个布尔值，不打印任何证书内容；Secrets 由 GitHub 自动打码，且不会传给 fork 的 PR。往日志里加调试输出时别 `echo` 证书、密码、描述文件原文。
 3. **`workflow_dispatch` 只有仓库写权限的人能点。** 别人 fork 后是在自己的账号下跑、算自己的额度，烧不到你头上。
 
@@ -35,36 +35,34 @@
 - 默认**只有手动触发和打 `v*` tag 才构建**，日常 push 不排队（想改：把 workflow 里 `push.tags` 换成 `branches: [main]`）。
 - 一个 job 干完所有事，不拆多个短 job —— 每次 job 启动都有一轮固定开销。
 - `concurrency.cancel-in-progress`：连点两次不会并行跑两份。
-- 显式锁 `macos-26`，不跟 `macos-latest` 漂移 —— 后者 2026 年 7 月起已从 macOS 15 迁到 macOS 26，默认 Xcode 从 16.4 跳到 26.4.1，哪天构建突然变红很难查。
+- 显式锁 `macos-26`，不跟 `macos-latest` 漂移 —— 后者 2026 年 7 月起已从 macOS 15 迁到 macOS 26，默认 Xcode 从 16.4 跳到 26.x，哪天构建突然变红很难查。
 
 ---
 
-## 二、怎么出第一个 IPA
+## 二、已经跑通了（2026-11-11 实测）
 
-1. 在 GitHub 新建**公开**仓库（不要勾 README / .gitignore / License，保持空仓库），然后：
+仓库：`https://github.com/caojunee/MultiSpace`（公开）。
+首次成功构建：`actions/runs/43018562973` → **success**，约 1 分钟出包。Xcode **26.6 / iPhoneOS26.5 SDK** 下 7 个 Swift 源文件全部真实编译通过，产出 `MultiSpace-IPA-2`（164 KB，未签名 IPA），结构已核对：`Payload/MultiSpace.app`、arm64 Mach-O、`MinimumOSVersion 17.0`、无签名。
 
-   ```bash
-   cd ios_repo
-   git remote add origin https://github.com/<你的用户名>/MultiSpace.git
-   git branch -M main
-   git push -u origin main
-   ```
+### 重新出包
 
-   本地仓库已 `git init` 并做过首次提交，不用重新初始化。
+1. 仓库 → **Actions** → 左侧「构建 iOS IPA」→ **Run workflow**。不勾签名，直接跑。
+2. 跑完在 run 页面底部 **Artifacts** 下载 `MultiSpace-IPA-<run号>`，解压得到 `MultiSpace-unsigned.ipa`。
+3. 这个 IPA **未签名**，用 Sideloadly / AltStore 配合 Apple ID 自签后就能装到 iOS 27.2 上（免费账号：7 天有效、最多 3 个自签 App）。
 
-2. 打开仓库 → **Actions** → 左侧「构建 iOS IPA」→ **Run workflow**。不勾签名，直接跑。
-3. 跑完在 run 页面底部 **Artifacts** 下载 `MultiSpace-IPA-1`，解压得到 `MultiSpace-unsigned.ipa`。
-4. 这个 IPA **未签名**，用 Sideloadly / AltStore 配合你的 Apple ID 自签后就能装到 iOS 27.2 上（免费账号：7 天有效、最多 3 个自签 App）。
+改完代码推送：
 
-> App Store 提交要求 Xcode 26+ 构建（2026-04-28 起），`macos-26` runner 默认 Xcode 26.4.1，正好满足。但正式上架还需要 $99/年开发者账号 + 证书 + App Store Connect 记录，那一步不是 CI 能代劳的。
+```bash
+git add -A && git commit -m "..." && git push origin main
+```
 
-### 推送前两个环境细节
+`push` 到 main **不会触发构建**（只有手动触发和 `v*` tag 会），别以为推完就有新包。
 
-- **代理**：本机当前 shell 的默认代理到 github.com 不通，**直连可用**。push 时绕开代理即可：
-  ```bash
-  git -c http.proxy= -c https.proxy= push -u origin main
-  ```
-  换个网络环境时，按实际情况设 `https_proxy` 或取消代理再推。
+> App Store 提交要求 Xcode 26+ 构建（2026-04-28 起），runner 当前 Xcode 26.6 满足。正式上架还需要 $99/年开发者账号 + 证书 + App Store Connect 记录，那一步不是 CI 能代劳的。
+
+### 网络与凭据
+
+- **代理**：换机器后如果 push 卡住，先确认代理。可用 `git -c http.proxy= -c https.proxy= push origin main` 强制直连，或按实际环境设 `https_proxy`。GitHub API 与网页端可能走不同路径，别只看一边就下结论。
 - **凭据**：GitHub HTTPS 推送早就停用密码，用 Personal Access Token 或让 Git Credential Manager 弹浏览器授权。
 
 ### 公开前已核过的内容
