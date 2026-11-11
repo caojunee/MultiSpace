@@ -1,0 +1,191 @@
+name: 构建 iOS IPA
+
+# 默认只在手动触发 / 打 tag 时构建，日常 push 不消耗 macOS 分钟。
+# 想改成每次 push 都构建：把下面 push 的 tags 段换成 branches: [main]
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: '用证书签名（需要先配好 4 个 Secrets）'
+        type: boolean
+        default: false
+      export_method:
+        description: '签名导出方式'
+        type: choice
+        options:
+          - ad-hoc
+          - development
+          - app-store
+        default: ad-hoc
+      bundle_id:
+        description: 'Bundle ID（必须与描述文件匹配）'
+        type: string
+        default: com.niubige.MultiSpace
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT: MultiSpace.xcodeproj
+  SCHEME: MultiSpace
+  BUNDLE_ID: ${{ inputs.bundle_id || 'com.niubige.MultiSpace' }}
+  EXPORT_METHOD: ${{ inputs.export_method || 'ad-hoc' }}
+  SIGNING_READY: ${{ secrets.P12_BASE64 != '' && secrets.MOBILEPROVISION_BASE64 != '' && secrets.P12_PASSWORD != '' && secrets.TEAM_ID != '' }}
+
+jobs:
+  build:
+    # 显式锁定 macOS 26：macos-latest 会在 GitHub 迁移时漂移，且 App Store 要求 Xcode 26+ 构建
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境与构建决策
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+          echo "Bundle ID : $BUNDLE_ID"
+          echo "导出方式  : $EXPORT_METHOD"
+          echo "签名材料  : $SIGNING_READY"
+
+          DO_SIGN=false
+          if [ "${{ inputs.sign }}" = "true" ] && [ "$SIGNING_READY" = "true" ]; then
+            DO_SIGN=true
+          fi
+          if [ "${{ inputs.sign }}" = "true" ] && [ "$DO_SIGN" != "true" ]; then
+            echo "::warning::勾选了签名，但 4 个 Secrets 没配齐，本次将输出未签名 IPA。"
+          fi
+          echo "DO_SIGN=$DO_SIGN" >> "$GITHUB_ENV"
+
+          mkdir -p "$RUNNER_TEMP/ipa"
+          echo "### 构建信息" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Xcode: $(xcodebuild -version | head -1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bundle ID: $BUNDLE_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 签名: $DO_SIGN" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 校验 Xcode 工程
+        run: xcodebuild -list -project "$PROJECT"
+
+      - name: 导入证书与描述文件
+        if: env.DO_SIGN == 'true'
+        env:
+          P12_BASE64: ${{ secrets.P12_BASE64 }}
+          MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/build.keychain-db"
+          KC_PASS="$(openssl rand -base64 24)"
+
+          security create-keychain -p "$KC_PASS" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KC_PASS" "$KC"
+          security list-keychains -d user -s "$KC"
+
+          python3 - <<'PY'
+          import base64, os, pathlib
+          t = pathlib.Path(os.environ['RUNNER_TEMP'])
+          (t / 'cert.p12').write_bytes(base64.b64decode(os.environ['P12_BASE64']))
+          (t / 'profile.mobileprovision').write_bytes(base64.b64decode(os.environ['MOBILEPROVISION_BASE64']))
+          PY
+
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -A
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KC_PASS" "$KC" >/dev/null
+
+          PROFILE_UUID=$(python3 - <<'PY'
+          import os, pathlib, plistlib, subprocess
+          t = pathlib.Path(os.environ['RUNNER_TEMP'])
+          p = t / 'profile.mobileprovision'
+          info = plistlib.loads(subprocess.check_output(['security', 'cms', '-D', '-i', str(p)]))
+          dest = pathlib.Path.home() / 'Library' / 'MobileDevice' / 'Provisioning Profiles'
+          dest.mkdir(parents=True, exist_ok=True)
+          (dest / (info['UUID'] + '.mobileprovision')).write_bytes(p.read_bytes())
+
+          opts = {
+              'method': os.environ['EXPORT_METHOD'],
+              'teamID': os.environ['TEAM_ID'],
+              'signingStyle': 'manual',
+              'provisioningProfiles': {os.environ['BUNDLE_ID']: info['UUID']},
+              'stripSwiftSymbols': True,
+              'compileBitcode': False,
+          }
+          with (t / 'ExportOptions.plist').open('wb') as f:
+              plistlib.dump(opts, f)
+          print(info['UUID'])
+          PY
+          )
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "描述文件 UUID: $PROFILE_UUID"
+
+      - name: Archive（已签名）
+        if: env.DO_SIGN == 'true'
+        env:
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/MultiSpace.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            clean archive
+
+      - name: 导出签名 IPA
+        if: env.DO_SIGN == 'true'
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/MultiSpace.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+          cp "$RUNNER_TEMP"/export/*.ipa "$RUNNER_TEMP/ipa/"
+
+      - name: Archive + 打包未签名 IPA
+        if: env.DO_SIGN != 'true'
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/MultiSpace.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            clean archive
+
+          APP="$RUNNER_TEMP/MultiSpace.xcarchive/Products/Applications/MultiSpace.app"
+          test -d "$APP" || { echo "::error::archive 里没有找到 MultiSpace.app"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry MultiSpace-unsigned.ipa Payload && rm -rf Payload)
+
+      - name: 构建产物
+        run: |
+          set -euo pipefail
+          ls -lh "$RUNNER_TEMP/ipa/"
+          for f in "$RUNNER_TEMP"/ipa/*.ipa; do
+            echo "- $(basename "$f") : $(du -h "$f" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MultiSpace-IPA-${{ github.run_number }}
+          path: ${{ runner.temp }}/ipa/*.ipa
+          retention-days: 7
+          if-no-files-found: error

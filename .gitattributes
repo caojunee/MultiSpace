@@ -1,0 +1,9 @@
+# CI 在 macOS runner 上执行 workflow 里的 bash 片段，CRLF 会导致
+# `$'\r': command not found`。统一以 LF 入库、以 LF 检出。
+* text=auto eol=lf
+
+*.p12 binary
+*.mobileprovision binary
+*.ipa binary
+*.png binary
+*.xcarchive binary
