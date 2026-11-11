@@ -48,7 +48,7 @@
 
 1. 仓库 → **Actions** → 左侧「构建 iOS IPA」→ **Run workflow**。不勾签名，直接跑。
 2. 跑完在 run 页面底部 **Artifacts** 下载 `MultiSpace-IPA-<run号>`，解压得到 `MultiSpace-unsigned.ipa`。
-3. 这个 IPA **未签名**，用 Sideloadly / AltStore 配合 Apple ID 自签后就能装到 iOS 27.2 上（免费账号：7 天有效、最多 3 个自签 App）。
+3. 这个 IPA **未签名**，用 Sideloadly / AltStore 配合 Apple ID 自签后就能装到 iOS 27.2 上（免费账号：7 天有效、最多 3 个自签 App）。完整步骤见第三节。
 
 改完代码推送：
 
@@ -78,7 +78,53 @@ git add -A && git commit -m "..." && git push origin main
 
 ---
 
-## 三、让 CI 直接产出可安装的签名 IPA
+## 三、把 IPA 装到 iPhone 上
+
+本仓库默认产出的 `MultiSpace-unsigned.ipa` **没有签名，直接拖进手机装不了**。iOS 只认 Apple 签发过的包，能装的渠道一共四条：
+
+| 渠道 | 谁签名 | 有效期 | 用户这边怎么装 |
+|---|---|---|---|
+| **TestFlight** | 开发者上传到 App Store Connect，Apple 审核后分发 | 构建 90 天 | 装 TestFlight，点邀请邮件或公开链接。内部 100 人免审，外部上限 10,000 人、首个构建要过 Beta 审核 |
+| **Ad Hoc / 超级签名** | 开发者把你设备的 UDID 写进描述文件 | 最长 1 年，每类设备 100 台 | 拿 IPA 或网页点 `itms-services` 安装。市面「按设备收费」的签名平台就是这条 |
+| **企业签名** | 共用一张企业证书 | 随时可能掉签 | 装完去「设置 → 通用 → VPN 与设备管理」信任企业开发者。Apple 一吊销，装过的 App 全部打不开 |
+| **个人自签** | 你自己的 Apple ID 现签 | 7 天，最多 3 个 App | Sideloadly / AltStore / SideStore，需要电脑、数据线、开发者模式 |
+
+未签名 IPA 只能走第 4 条。TrollStore 在 iOS 17.0 之后已失效；欧盟 DMA 的 AltStore PAL / 网页分发只限欧盟账号与地区。
+
+### Windows + Sideloadly 实操
+
+**前置（一次性）**
+
+1. 安装**网页版 iTunes 与 iCloud**（从 Apple 官网下安装包）。Sideloadly 依赖其中的设备驱动和签名组件，**Microsoft Store 版不行**，装了要先卸载。
+2. 安装 Sideloadly，只从 `sideloadly.io` 下载，别用第三方镜像。
+3. iPhone 开启**开发者模式**：设置 → 隐私与安全性 → 开发者模式 → 打开并重启（iOS 16+ 起，自签应用必须开）。
+4. 数据线连接电脑，在手机上点「信任此电脑」。
+
+**安装**
+
+1. 打开 Sideloadly，把 `MultiSpace-unsigned.ipa` 拖进去，选中你的设备。
+2. 填 Apple ID。建议单独注册一个小号，**不必与手机登录的 iCloud 账号相同**；推荐使用 App 专用密码。
+3. 点 Start，等签名与安装完成。
+4. 手机上：设置 → 通用 → VPN 与设备管理 → 找到该 Apple ID 的描述文件 → 点「信任」。
+5. 回桌面打开 App。首次若闪退或报权限错误，先看 Sideloadly 的 Installation Log。
+
+**限制与维护**
+
+- 免费 Apple ID：**7 天到期**、同时最多 **3 个**自签 App、每 7 天最多新建 **10 个 App ID**。
+- 续期要用**同一个 Apple ID + 同一个 Bundle ID** 覆盖安装，App 内数据才会保留；或在 Sideloadly 里开启自动刷新（要求电脑开机，手机在同一 WiFi 或插着 USB）。
+- 付费开发者账号（$99/年）签名有效期 1 年、不限 3 个 App，做法见第四节把签名接进 CI。
+- iOS 27.2 这类很新的版本，签名工具可能滞后：报兼容错误时先升级 Sideloadly 到最新版，再查官方 FAQ。
+- 侧载 App 的内购不可用；别用来源不明的 IPA，Sideloadly 只会照原样签名，不负责内容安全。
+
+### 想发给别人装
+
+- **最正规**：付费账号 → 上传到 App Store Connect → TestFlight 公开链接。对方不用电脑、不用提供 UDID，装 TestFlight 点链接即可，构建 90 天有效。
+- **小规模定向**：让对方给 UDID，加进 Ad Hoc 描述文件后把签名 IPA 发过去，即第四节 `sign` + `ad-hoc` 的用途。
+- **别买**「企业签名 / 超级签名」服务来分发自己的 App：证书来源不明、随时掉签，还可能被夹带篡改过的包。
+
+---
+
+## 四、让 CI 直接产出可安装的签名 IPA
 
 在 `Settings → Secrets and variables → Actions` 里加 4 个 Secret，然后触发构建时勾选 `sign`：
 
@@ -95,7 +141,7 @@ git add -A && git commit -m "..." && git push origin main
 
 ---
 
-## 四、工程结构
+## 五、工程结构
 
 ```
 ios_repo/
@@ -119,7 +165,7 @@ ios_repo/
 
 ---
 
-## 五、已知限制（不是 bug，是平台边界）
+## 六、已知限制（不是 bug，是平台边界）
 
 - **微信网页版**：腾讯早已停止大多数账号的网页登录，这个空间大概率停在扫码页。WhatsApp / Telegram / Gmail / 微博 / 小红书等网页版可用。
 - 手机上很多站点会跳移动版或弹「打开 App」，右上角菜单里有**桌面模式**开关（切换 User-Agent + `preferredContentMode`）。
@@ -130,7 +176,7 @@ ios_repo/
 
 ---
 
-## 六、本地 Mac 那条路
+## 七、本地 Mac 那条路
 
 本机目前没有可用的 iOS 编译环境：Windows 侧没有 iOS SDK；局域网那台 Mac 只有 CommandLineTools，没有 Xcode.app、iPhoneOS SDK 和签名证书，且系统版本低于 Xcode 26 的最低要求。要走本地编译，得先升级 macOS → 装 Xcode → 配开发者证书，三步都不少。
 
